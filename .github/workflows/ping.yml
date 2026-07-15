@@ -1,0 +1,14 @@
+name: keepalive
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ping
+        env:
+          PING_URL: ${{ secrets.PING_URL }}
+        run: curl -sS --max-time 90 "$PING_URL" > /dev/null && echo "servicio despierto"

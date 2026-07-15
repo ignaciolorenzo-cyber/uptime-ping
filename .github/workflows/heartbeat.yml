@@ -1,0 +1,21 @@
+name: heartbeat
+# GitHub desactiva los crons tras 60 días sin actividad en el repo.
+# Este job hace un commit mensual para que eso nunca pase.
+on:
+  schedule:
+    - cron: "0 12 1 * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  beat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          date > ultimo-latido.txt
+          git config user.name "heartbeat"
+          git config user.email "bot@users.noreply.github.com"
+          git add ultimo-latido.txt
+          git commit -m "heartbeat mensual"
+          git push
