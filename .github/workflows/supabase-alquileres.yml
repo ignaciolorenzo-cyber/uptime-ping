@@ -1,7 +1,7 @@
 name: supabase-alquileres-keepalive
 # Supabase pausa los proyectos del plan gratis cuando no detecta uso real.
-# Por eso esta tarea no solo consulta: inicia sesión con un usuario de monitoreo
-# (lo que escribe en la base) y después lee datos, igual que una persona usando la app.
+# Esta tarea llama a la función ping(), que ESCRIBE una fila en la base: eso deja
+# actividad de verdad, no solo una consulta de lectura.
 on:
   schedule:
     - cron: "17 12 * * *"
@@ -11,45 +11,18 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: entrar y leer
+      - name: escribir en la base
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          MONITOR_EMAIL: ${{ secrets.MONITOR_EMAIL }}
-          MONITOR_PASSWORD: ${{ secrets.MONITOR_PASSWORD }}
         run: |
-          set -o pipefail
-
-          # 1) Iniciar sesión (esto crea una sesión en la base: es actividad real)
-          login=$(curl -sS --max-time 60 \
-            -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+          code=$(curl -sS --max-time 60 -o /tmp/out.txt -w "%{http_code}" \
+            -X POST "$SUPABASE_URL/rest/v1/rpc/ping" \
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"email\":\"$MONITOR_EMAIL\",\"password\":\"$MONITOR_PASSWORD\"}")
-          token=$(printf '%s' "$login" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
-          if [ -z "$token" ]; then
-            echo "No se pudo iniciar sesión (revisá los secrets MONITOR_EMAIL y MONITOR_PASSWORD)."
-            printf '%s' "$login" | head -c 300
-            exit 1
+            -d '{}')
+          echo "HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "La base no respondió: probablemente esté pausada."; cat /tmp/out.txt; exit 1
           fi
-          echo "Sesión iniciada."
-
-          # 2) Leer datos como usuario autenticado
-          code=$(curl -sS --max-time 60 -o /tmp/lectura.txt -w "%{http_code}" \
-            "$SUPABASE_URL/rest/v1/registros?select=id&limit=1" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $token")
-          echo "Lectura: HTTP $code"
-          [ "$code" = "200" ] || { cat /tmp/lectura.txt; exit 1; }
-
-          # 3) Consulta a la base, para dejar una operación más registrada
-          hora=$(curl -sS --max-time 60 -X POST "$SUPABASE_URL/rest/v1/rpc/ping" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $token" \
-            -H "Content-Type: application/json" -d '{}')
-          echo "Base despierta: $hora"
-
-          # 4) Cerrar la sesión para no dejar sesiones abiertas acumulándose
-          curl -sS --max-time 30 -o /dev/null -X POST "$SUPABASE_URL/auth/v1/logout" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $token" || true
+          echo "Base despierta: $(cat /tmp/out.txt)"
